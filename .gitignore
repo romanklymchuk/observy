@@ -5,3 +5,6 @@ node_modules/
 .DS_Store
 logs/
 *.log
+
+# Observy API runtime files
+observy-api/uploads/
