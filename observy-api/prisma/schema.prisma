@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Station {
+  id           String   @id @default(uuid())
+  name         String
+  locationName String?
+  createdAt    DateTime @default(now())
+
+  events Event[]
+}
+
+model Event {
+  id             String   @id @default(uuid())
+  stationId      String
+  capturedAt     DateTime @default(now())
+  temperature    Float?
+  humidity       Float?
+  motionDetected Boolean  @default(true)
+  status         String   @default("uploaded")
+  createdAt      DateTime @default(now())
+
+  station Station @relation(fields: [stationId], references: [id])
+  photos  Photo[]
+  audios  Audio[]
+}
+
+model Photo {
+  id        String   @id @default(uuid())
+  eventId   String
+  url       String
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id])
+}
+
+model Audio {
+  id          String   @id @default(uuid())
+  eventId     String
+  url         String
+  durationSec Float?
+  createdAt   DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id])
+}

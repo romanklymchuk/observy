@@ -1,0 +1,11 @@
+{
+  "stationId": "observy-alpha-01",
+  "stationName": "Observy Alpha",
+  "locationName": "Kyiv Balcony",
+  "apiUrl": "http://localhost:4000",
+  "captureInterval": 15000,
+  "temperatureMin": 20,
+  "temperatureMax": 28,
+  "humidityMin": 45,
+  "humidityMax": 70
+}
