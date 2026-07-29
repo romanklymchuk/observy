@@ -1,5 +1,6 @@
 const Camera = require("../hardware/camera");
 const Microphone = require("../hardware/microphone");
+const Sensors = require("../hardware/sensors");
 const { uploadEvent } = require("../services/upload.service");
 
 const {
@@ -10,10 +11,6 @@ const {
 const {
   createLogger,
 } = require("../observability/logger");
-
-function randomBetween(min, max) {
-  return min + Math.random() * (max - min);
-}
 
 function getDurationMs(startedAtMs) {
   return Number(
@@ -62,39 +59,59 @@ async function runCaptureCycle({
   try {
     /*
      * Environment sensors
-     *
-     * Поки що значення генеруються тут.
-     * У наступному кроці винесемо їх у Sensor HAL.
      */
-    currentStage = "sensors.environment.read";
+    currentStage = "sensors.environment";
+
+    logger.info(
+      "sensors.environment.started"
+    );
 
     const sensorStartedAtMs =
       getMonotonicMs();
 
-    const temperature = Number(
-      randomBetween(
-        config.temperatureMin,
-        config.temperatureMax
-      ).toFixed(1)
-    );
+    let environment;
 
-    const humidity = Number(
-      randomBetween(
-        config.humidityMin,
-        config.humidityMax
-      ).toFixed(1)
-    );
+    try {
+      environment =
+        await Sensors.readEnvironment(config);
 
-    logger.info(
-      "sensors.environment.read",
-      {
-        temperatureC: temperature,
-        humidityPercent: humidity,
-        driver: "inline_mock",
-        durationMs:
-          getDurationMs(sensorStartedAtMs),
-      }
-    );
+      logger.info(
+        "sensors.environment.read",
+        {
+          temperatureC:
+            environment.temperature,
+
+          humidityPercent:
+            environment.humidity,
+
+          driver:
+            environment.driver,
+
+          capturedAt:
+            environment.capturedAt,
+
+          durationMs:
+            getDurationMs(sensorStartedAtMs),
+        }
+      );
+    } catch (error) {
+      logger.error(
+        "sensors.environment.failed",
+        {
+          durationMs:
+            getDurationMs(sensorStartedAtMs),
+
+          error,
+        }
+      );
+
+      throw error;
+    }
+
+    const {
+      temperature,
+      humidity,
+    } = environment;
 
     /*
      * Photo capture
