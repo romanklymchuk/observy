@@ -22,16 +22,32 @@ async function runCaptureCycle({
   config,
   apiUrl,
   stationId,
+  trigger = {
+    type: "manual",
+    source: "runtime",
+    detectedAt: new Date().toISOString(),
+    metadata: {},
+  },
 }) {
+  const triggerType = String(
+    trigger.type || "unknown"
+  )
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "_");
+
   const observationContext =
     createObservationContext({
       stationId,
-      trigger: "motion",
+      trigger: triggerType,
       metadata: {
         triggerSource:
-          process.env.DEVICE_MODE === "mock"
-            ? "mock"
-            : "hardware",
+          trigger.source || "unknown",
+
+        triggerDetectedAt:
+          trigger.detectedAt || null,
+
+        triggerMetadata:
+          trigger.metadata || {},
       },
     });
 
@@ -46,10 +62,22 @@ async function runCaptureCycle({
 
   let currentStage = "observation.created";
 
-  logger.info("trigger.motion.detected", {
-    source:
-      observationContext.metadata.triggerSource,
-  });
+  logger.info(
+    `trigger.${triggerType}.detected`,
+    {
+      source:
+        observationContext.metadata
+          .triggerSource,
+
+      detectedAt:
+        observationContext.metadata
+          .triggerDetectedAt,
+
+      metadata:
+        observationContext.metadata
+          .triggerMetadata,
+    }
+  );
 
   logger.info("observation.created", {
     observationStartedAt:

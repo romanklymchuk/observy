@@ -1,7 +1,9 @@
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
 require("dotenv").config();
+
+const Trigger = require("./hardware/trigger");
 
 const {
   ensureStation,
@@ -39,7 +41,7 @@ const LOCATION_NAME =
 async function main() {
   try {
     console.log(
-      "🟢 Observy Virtual Device started"
+      "🟢 Observy Device Runtime started"
     );
 
     console.log(
@@ -53,22 +55,42 @@ async function main() {
       locationName: LOCATION_NAME,
     });
 
+    console.log("🟡 Waiting for trigger...");
+
+    const trigger =
+      await Trigger.waitForTrigger({
+        delayMs:
+          config.mockTriggerDelayMs,
+      });
+
+    console.log(
+      `🟢 Trigger received: ${trigger.type} from ${trigger.source}`
+    );
+
     const event = await runCaptureCycle({
       config,
       apiUrl: API_URL,
       stationId: STATION_ID,
+      trigger,
     });
 
+    console.log("✅ Observation complete");
     console.log(event);
   } catch (error) {
-    const details =
-      error.response?.data ||
-      error.message;
-
     console.error(
-      "🔴 Observy device failed:",
-      details
+      "🔴 Observy device failed"
     );
+
+    console.error({
+      name: error?.name,
+      message: error?.message,
+      code: error?.code,
+      cause: error?.cause,
+      responseStatus:
+        error?.response?.status,
+      responseData:
+        error?.response?.data,
+    });
 
     process.exitCode = 1;
   }
