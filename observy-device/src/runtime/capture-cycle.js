@@ -4,6 +4,10 @@ const Sensors = require("../hardware/sensors");
 const { uploadEvent } = require("../services/upload.service");
 
 const {
+  enqueueObservation,
+} = require("../services/queue.service");
+
+const {
   createObservationContext,
   getMonotonicMs,
 } = require("../observability/context");
@@ -28,6 +32,7 @@ async function runCaptureCycle({
     detectedAt: new Date().toISOString(),
     metadata: {},
   },
+  stateMachine = null,
 }) {
   const triggerType = String(
     trigger.type || "unknown"
@@ -141,6 +146,10 @@ async function runCaptureCycle({
       humidity,
     } = environment;
 
+    stateMachine?.transition(
+      "CAPTURING"
+    );
+
     /*
      * Photo capture
      */
@@ -154,13 +163,38 @@ async function runCaptureCycle({
     let photoPath;
 
     try {
+      const photoResult =
+        await Camera.capturePhoto({
+          width:
+            config.camera?.width,
+
+          height:
+            config.camera?.height,
+
+          quality:
+            config.camera?.quality,
+
+          timeoutMs:
+            config.camera?.timeoutMs,
+        });
+
       photoPath =
-        await Camera.capturePhoto();
+        photoResult.path;
 
       logger.info(
         "capture.photo.completed",
         {
           photoPath,
+
+          driver:
+            photoResult.driver,
+
+          sizeBytes:
+            photoResult.sizeBytes,
+
+          capturedAt:
+            photoResult.capturedAt,
+
           durationMs:
             getDurationMs(photoStartedAtMs),
         }
@@ -215,6 +249,14 @@ async function runCaptureCycle({
       throw error;
     }
 
+    stateMachine?.transition(
+      "PROCESSING"
+    );
+
+    stateMachine?.transition(
+      "UPLOADING"
+    );
+
     /*
      * Upload observation
      */
@@ -260,12 +302,101 @@ async function runCaptureCycle({
         error,
       });
 
-      throw error;
+      const queuedItem =
+        enqueueObservation({
+          traceId:
+            observationContext.traceId,
+
+          stationId,
+
+          capturedAt:
+            observationContext
+              .observationStartedAt,
+
+          photoPath,
+          audioPath,
+
+          temperature,
+          humidity,
+
+          durationSec: 8,
+          trigger,
+          error,
+        });
+
+      stateMachine?.transition(
+        "QUEUED",
+        {
+          queueId:
+            queuedItem.queueId,
+
+          errorCode:
+            error?.code ??
+            error?.cause?.code ??
+            null,
+        }
+      );
+
+      logger.warn(
+        "observation.queued",
+        {
+          queueId:
+            queuedItem.queueId,
+
+          reason:
+            error?.code ||
+            error?.cause?.code ||
+            error?.message ||
+            "upload_failed",
+
+          photoPath:
+            queuedItem.observation
+              .photoPath,
+
+          audioPath:
+            queuedItem.observation
+              .audioPath,
+
+          durationMs:
+            getDurationMs(cycleStartedAtMs),
+        }
+      );
+
+      return {
+        queued: true,
+
+        queueId:
+          queuedItem.queueId,
+
+        traceId:
+          observationContext.traceId,
+
+        station_id:
+          stationId,
+
+        captured_at:
+          observationContext
+            .observationStartedAt,
+
+        species:
+          "Pending upload",
+
+        confidence:
+          null,
+      };
     }
 
     /*
      * Observation successfully completed
      */
+    stateMachine?.transition(
+      "COMPLETED",
+      {
+        eventId: event?.id ?? null,
+        species: event?.species ?? null,
+      }
+    );
+
     logger.info(
       "observation.completed",
       {
