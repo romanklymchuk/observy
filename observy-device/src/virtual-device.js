@@ -19,6 +19,14 @@ const {
 } = require("./runtime/state-machine");
 
 
+const {
+  getDeviceHealth,
+} = require("./services/health.service");
+
+const {
+  processQueue,
+} = require("./services/queue-worker.service");
+
 const configPath = path.join(
   __dirname,
   "../config/device.json"
@@ -115,6 +123,141 @@ async function main() {
 
       console.warn(
         `🟠 API unavailable — using local station config: ${STATION_ID}`
+      );
+    }
+
+    console.log(
+      "🩺 Running device health check..."
+    );
+
+    const health =
+      await getDeviceHealth({
+        stationId: STATION_ID,
+        logger: systemLogger,
+      });
+
+    systemLogger.info(
+      "runtime.health.result",
+      {
+        status: health.status,
+        ok: health.ok,
+      }
+    );
+
+    if (
+      health.status === "unhealthy"
+    ) {
+      const failedComponents =
+        Object.entries(
+          health.components
+        )
+          .filter(
+            ([, component]) =>
+              component.ok === false
+          )
+          .map(
+            ([name]) => name
+          );
+
+      const error =
+        new Error(
+          `Critical device health failure: ${
+            failedComponents.join(", ")
+          }`
+        );
+
+      error.code =
+        "DEVICE_UNHEALTHY";
+
+      throw error;
+    }
+
+    if (
+      health.status === "degraded"
+    ) {
+      systemLogger.warn(
+        "runtime.health.degraded",
+        {
+          degradedComponents:
+            Object.entries(
+              health.components
+            )
+              .filter(
+                ([, component]) =>
+                  component.ok === false
+              )
+              .map(
+                ([name]) => name
+              ),
+        }
+      );
+
+      console.warn(
+        "🟠 Device health degraded — runtime will continue"
+      );
+    } else {
+      console.log(
+        "✅ Device health: healthy"
+      );
+    }
+
+    console.log(
+      "🔄 Checking pending queue..."
+    );
+
+    try {
+      const queueResult =
+        await processQueue({
+          apiUrl: API_URL,
+          logger: systemLogger,
+          maxItems: 20,
+        });
+
+      systemLogger.info(
+        "runtime.queue.recovery.completed",
+        {
+          found:
+            queueResult.found,
+
+          uploaded:
+            queueResult.uploaded,
+
+          failed:
+            queueResult.failed,
+        }
+      );
+
+      if (
+        queueResult.found > 0
+      ) {
+        console.log(
+          `📦 Queue recovery: ` +
+          `${queueResult.uploaded}/${queueResult.found} delivered`
+        );
+      } else {
+        console.log(
+          "✅ Queue recovery: nothing pending"
+        );
+      }
+    } catch (error) {
+      systemLogger.warn(
+        "runtime.queue.recovery.failed",
+        {
+          errorName:
+            error?.name,
+
+          errorMessage:
+            error?.message,
+
+          errorCode:
+            error?.code ??
+            error?.cause?.code ??
+            null,
+        }
+      );
+
+      console.warn(
+        "🟠 Queue recovery failed — runtime will continue"
       );
     }
 

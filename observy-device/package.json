@@ -5,7 +5,8 @@
   "main": "src/virtual-device.js",
   "type": "commonjs",
   "scripts": {
-    "virtual": "node src/virtual-device.js"
+    "virtual": "node src/virtual-device.js",
+    "smoke": "DEVICE_MODE=mock CAMERA_DRIVER=mock TRIGGER_DRIVER=mock node scripts/smoke-runtime.js"
   },
   "dependencies": {
     "axios": "^1.10.0",
