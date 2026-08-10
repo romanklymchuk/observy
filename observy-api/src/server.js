@@ -7,6 +7,11 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const { toFeed } = require("./services/feedService");
+
+const {
+  saveHeartbeat,
+  getStationStatus,
+} = require("./services/stationStatusService");
 require("dotenv").config();
 
 const app = express();
@@ -55,6 +60,96 @@ app.post("/stations", (req, res) => {
     locationName: req.body.locationName || station.locationName,
   });
 });
+
+app.post(
+  "/stations/:stationId/heartbeat",
+  (req, res) => {
+    const {
+      stationId,
+    } = req.params;
+
+    if (!stationId) {
+      return res.status(400).json({
+        error:
+          "stationId is required",
+      });
+    }
+
+    const {
+      status,
+      runtimeState,
+      queue,
+      components,
+    } = req.body || {};
+
+    if (
+      !status ||
+      typeof status !== "string"
+    ) {
+      return res.status(400).json({
+        error:
+          "status is required",
+      });
+    }
+
+    if (
+      queue?.pendingCount !==
+        undefined &&
+      !Number.isFinite(
+        Number(
+          queue.pendingCount
+        )
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          "queue.pendingCount must be numeric",
+      });
+    }
+
+    const saved =
+      saveHeartbeat(
+        stationId,
+        {
+          schemaVersion:
+            req.body.schemaVersion,
+
+          sentAt:
+            req.body.sentAt,
+
+          status,
+          runtimeState,
+          queue,
+          components,
+        }
+      );
+
+    return res.status(200).json(
+      saved
+    );
+  }
+);
+
+app.get(
+  "/stations/:stationId/status",
+  (req, res) => {
+    const status =
+      getStationStatus(
+        req.params.stationId
+      );
+
+    if (!status) {
+      return res.status(404).json({
+        error:
+          "station status not found",
+      });
+    }
+
+    return res.json(
+      status
+    );
+  }
+);
 
 app.post(
   "/events",

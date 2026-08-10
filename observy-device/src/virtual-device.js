@@ -27,6 +27,10 @@ const {
   processQueue,
 } = require("./services/queue-worker.service");
 
+const {
+  sendHeartbeat,
+} = require("./services/telemetry.service");
+
 const configPath = path.join(
   __dirname,
   "../config/device.json"
@@ -265,6 +269,14 @@ async function main() {
       STATES.READY
     );
 
+    await sendHeartbeat({
+      apiUrl: API_URL,
+      stationId: STATION_ID,
+      runtimeState:
+        stateMachine.getState(),
+      logger: systemLogger,
+    });
+
     while (
       runForever ||
       completedCycles < maxCycles
@@ -320,6 +332,14 @@ async function main() {
         species: event?.species ?? null,
         confidence:
           event?.confidence ?? null,
+      });
+
+      await sendHeartbeat({
+        apiUrl: API_URL,
+        stationId: STATION_ID,
+        runtimeState:
+          stateMachine.getState(),
+        logger: systemLogger,
       });
     }
 

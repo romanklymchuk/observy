@@ -8,3 +8,7 @@ logs/
 
 # Observy API runtime files
 observy-api/uploads/
+
+# Observy API station runtime status
+observy-api/data/station-status.json
+
