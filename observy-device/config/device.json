@@ -7,5 +7,16 @@
   "temperatureMin": 20,
   "temperatureMax": 28,
   "humidityMin": 45,
-  "humidityMax": 70
+  "humidityMax": 70,
+  "vision": {
+    "enabled": false,
+    "burstSize": 10,
+    "bestFrame": {
+      "enabled": true,
+      "sharpnessWeight": 0.3,
+      "confidenceWeight": 0.4,
+      "objectSizeWeight": 0.2,
+      "borderPenaltyWeight": 0.1
+    }
+  }
 }
