@@ -16,3 +16,8 @@ observy-api/data/station-status.json
 # Python vision virtual environment
 observy-device/.venv-vision/
 
+
+# Python cache
+__pycache__/
+*.pyc
+
