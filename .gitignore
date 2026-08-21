@@ -21,3 +21,7 @@ observy-device/.venv-vision/
 __pycache__/
 *.pyc
 
+
+# Local ML model weights
+observy-device/*.pt
+
