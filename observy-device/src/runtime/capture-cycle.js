@@ -1,7 +1,14 @@
+const fs = require("node:fs");
+const path = require("node:path");
+
 const Camera = require("../hardware/camera");
 const Microphone = require("../hardware/microphone");
 const Sensors = require("../hardware/sensors");
 const { uploadEvent } = require("../services/upload.service");
+
+const {
+  processFrames,
+} = require("../services/vision.service");
 
 const {
   enqueueObservation,
@@ -253,6 +260,145 @@ async function runCaptureCycle({
       "PROCESSING"
     );
 
+    /*
+     * Optional Vision processing
+     *
+     * Current v0 integration stages the
+     * captured photo as a one-frame set.
+     * Burst capture will replace this
+     * staging step later.
+     */
+    let selectedPhotoPath =
+      photoPath;
+
+    if (
+      config.vision?.enabled === true
+    ) {
+      currentStage =
+        "vision.processing";
+
+      logger.info(
+        "vision.processing.started",
+        {
+          sourcePhotoPath:
+            photoPath,
+        }
+      );
+
+      const visionStartedAtMs =
+        getMonotonicMs();
+
+      const framesDirectory =
+        path.resolve(
+          process.cwd(),
+          "data",
+          "vision",
+          observationContext.traceId
+        );
+
+      try {
+        fs.mkdirSync(
+          framesDirectory,
+          {
+            recursive: true,
+          }
+        );
+
+        const stagedPhotoPath =
+          path.join(
+            framesDirectory,
+            "frame-001.jpg"
+          );
+
+        fs.copyFileSync(
+          photoPath,
+          stagedPhotoPath
+        );
+
+        const visionResult =
+          await processFrames({
+            framesDirectory,
+            model:
+              config.vision?.model ||
+              "yolo11n.pt",
+            logger,
+          });
+
+        if (
+          visionResult.ok &&
+          visionResult.bestFramePath
+        ) {
+          selectedPhotoPath =
+            visionResult.bestFramePath;
+
+          logger.info(
+            "vision.frame.selected",
+            {
+              bestFramePath:
+                selectedPhotoPath,
+
+              reason:
+                visionResult.reason ??
+                null,
+
+              score:
+                visionResult.metrics
+                  ?.score ??
+                null,
+
+              durationMs:
+                getDurationMs(
+                  visionStartedAtMs
+                ),
+            }
+          );
+        } else {
+          logger.warn(
+            "vision.fallback.used",
+            {
+              reason:
+                visionResult.reason ||
+                "vision_no_selection",
+
+              fallbackPhotoPath:
+                photoPath,
+
+              durationMs:
+                getDurationMs(
+                  visionStartedAtMs
+                ),
+            }
+          );
+        }
+      } catch (error) {
+        /*
+         * Vision is deliberately
+         * non-critical. Capture must
+         * survive ML failures.
+         */
+        selectedPhotoPath =
+          photoPath;
+
+        logger.warn(
+          "vision.fallback.used",
+          {
+            reason:
+              "vision_integration_failed",
+
+            fallbackPhotoPath:
+              photoPath,
+
+            durationMs:
+              getDurationMs(
+                visionStartedAtMs
+              ),
+
+            error,
+          }
+        );
+      }
+    }
+
     stateMachine?.transition(
       "UPLOADING"
     );
@@ -275,7 +421,8 @@ async function runCaptureCycle({
       event = await uploadEvent({
         apiUrl,
         stationId,
-        photoPath,
+        photoPath:
+          selectedPhotoPath,
         audioPath,
         temperature,
         humidity,
