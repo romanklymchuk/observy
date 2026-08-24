@@ -26,6 +26,13 @@ function parsePositiveInteger(
   return parsed;
 }
 
+function sleep(ms) {
+  return new Promise(
+    (resolve) =>
+      setTimeout(resolve, ms)
+  );
+}
+
 function buildDefaultOutputPath() {
   const directory = path.resolve(
     process.cwd(),
@@ -33,9 +40,12 @@ function buildDefaultOutputPath() {
     "captures"
   );
 
-  fs.mkdirSync(directory, {
-    recursive: true,
-  });
+  fs.mkdirSync(
+    directory,
+    {
+      recursive: true,
+    }
+  );
 
   return path.join(
     directory,
@@ -43,7 +53,27 @@ function buildDefaultOutputPath() {
   );
 }
 
-async function commandExists(command) {
+function buildBurstDirectory() {
+  const directory = path.resolve(
+    process.cwd(),
+    "data",
+    "bursts",
+    `burst-${Date.now()}`
+  );
+
+  fs.mkdirSync(
+    directory,
+    {
+      recursive: true,
+    }
+  );
+
+  return directory;
+}
+
+async function commandExists(
+  command
+) {
   try {
     await execFileAsync(
       "which",
@@ -56,7 +86,39 @@ async function commandExists(command) {
   }
 }
 
-async function capturePhoto(options = {}) {
+function validateCapturedFile(
+  outputPath
+) {
+  if (
+    !fs.existsSync(
+      outputPath
+    )
+  ) {
+    throw new Error(
+      `Camera command completed but file was not created: ${outputPath}`
+    );
+  }
+
+  const stats =
+    fs.statSync(
+      outputPath
+    );
+
+  if (
+    !stats.isFile() ||
+    stats.size === 0
+  ) {
+    throw new Error(
+      `Camera created an invalid file: ${outputPath}`
+    );
+  }
+
+  return stats;
+}
+
+async function capturePhoto(
+  options = {}
+) {
   const outputPath =
     options.outputPath ||
     buildDefaultOutputPath();
@@ -86,7 +148,9 @@ async function capturePhoto(options = {}) {
     );
 
   fs.mkdirSync(
-    path.dirname(outputPath),
+    path.dirname(
+      outputPath
+    ),
     {
       recursive: true,
     }
@@ -104,7 +168,10 @@ async function capturePhoto(options = {}) {
 
     "--quality",
     String(
-      Math.min(quality, 100)
+      Math.min(
+        quality,
+        100
+      )
     ),
 
     "--timeout",
@@ -122,7 +189,8 @@ async function capturePhoto(options = {}) {
       args,
       {
         timeout:
-          timeoutMs + 10000,
+          timeoutMs +
+          10000,
       }
     );
   } catch (error) {
@@ -135,41 +203,178 @@ async function capturePhoto(options = {}) {
       );
 
     wrapped.code =
-      error.code || "CAMERA_CAPTURE_FAILED";
+      error.code ||
+      "CAMERA_CAPTURE_FAILED";
 
-    wrapped.cause = error;
+    wrapped.cause =
+      error;
 
     throw wrapped;
   }
 
-  if (!fs.existsSync(outputPath)) {
-    throw new Error(
-      `Camera command completed but file was not created: ${outputPath}`
-    );
-  }
-
   const stats =
-    fs.statSync(outputPath);
-
-  if (stats.size === 0) {
-    throw new Error(
-      `Camera created an empty file: ${outputPath}`
+    validateCapturedFile(
+      outputPath
     );
-  }
 
   return {
-    path: outputPath,
-    driver: "raspberry",
+    path:
+      outputPath,
+
+    driver:
+      "raspberry",
+
     capturedAt:
-      new Date().toISOString(),
-    sizeBytes: stats.size,
+      new Date()
+        .toISOString(),
+
+    sizeBytes:
+      stats.size,
 
     metadata: {
       width,
       height,
       quality,
+
       autofocusMode:
         "continuous",
+    },
+  };
+}
+
+async function captureBurst(
+  options = {}
+) {
+  const count =
+    parsePositiveInteger(
+      options.count,
+      5
+    );
+
+  const intervalMs =
+    parsePositiveInteger(
+      options.intervalMs,
+      150
+    );
+
+  const outputDirectory =
+    options.outputDirectory ||
+    buildBurstDirectory();
+
+  const width =
+    parsePositiveInteger(
+      options.width,
+      2304
+    );
+
+  const height =
+    parsePositiveInteger(
+      options.height,
+      1296
+    );
+
+  const timeoutMs =
+    parsePositiveInteger(
+      options.timeoutMs,
+      800
+    );
+
+  const quality =
+    parsePositiveInteger(
+      options.quality,
+      90
+    );
+
+  fs.mkdirSync(
+    outputDirectory,
+    {
+      recursive: true,
+    }
+  );
+
+  const burstStartedAt =
+    new Date()
+      .toISOString();
+
+  const frames = [];
+
+  for (
+    let index = 0;
+    index < count;
+    index += 1
+  ) {
+    const frameNumber =
+      String(
+        index + 1
+      ).padStart(
+        3,
+        "0"
+      );
+
+    const outputPath =
+      path.join(
+        outputDirectory,
+        `frame-${frameNumber}.jpg`
+      );
+
+    const frameStartedAt =
+      Date.now();
+
+    const result =
+      await capturePhoto({
+        outputPath,
+        width,
+        height,
+        quality,
+        timeoutMs,
+      });
+
+    frames.push({
+      ...result,
+
+      index:
+        index + 1,
+
+      durationMs:
+        Date.now() -
+        frameStartedAt,
+    });
+
+    if (
+      index <
+      count - 1
+    ) {
+      await sleep(
+        intervalMs
+      );
+    }
+  }
+
+  return {
+    driver:
+      "raspberry",
+
+    count:
+      frames.length,
+
+    directory:
+      outputDirectory,
+
+    capturedAt:
+      burstStartedAt,
+
+    frames,
+
+    metadata: {
+      requestedCount:
+        count,
+
+      intervalMs,
+
+      width,
+      height,
+      quality,
+      timeoutMs,
     },
   };
 }
@@ -183,13 +388,21 @@ async function healthCheck() {
   if (!commandAvailable) {
     return {
       ok: false,
-      driver: "raspberry",
+
+      driver:
+        "raspberry",
+
       checkedAt:
-        new Date().toISOString(),
+        new Date()
+          .toISOString(),
 
       details: {
-        commandAvailable: false,
-        cameraDetected: false,
+        commandAvailable:
+          false,
+
+        cameraDetected:
+          false,
+
         reason:
           "rpicam-still_not_found",
       },
@@ -200,15 +413,16 @@ async function healthCheck() {
     const {
       stdout,
       stderr,
-    } = await execFileAsync(
-      "rpicam-hello",
-      [
-        "--list-cameras",
-      ],
-      {
-        timeout: 5000,
-      }
-    );
+    } =
+      await execFileAsync(
+        "rpicam-hello",
+        [
+          "--list-cameras",
+        ],
+        {
+          timeout: 5000,
+        }
+      );
 
     const output =
       `${stdout || ""}
@@ -218,17 +432,26 @@ ${stderr || ""}`;
       !output.includes(
         "No cameras available"
       ) &&
-      output.trim().length > 0;
+      output.trim()
+        .length > 0;
 
     return {
-      ok: cameraDetected,
-      driver: "raspberry",
+      ok:
+        cameraDetected,
+
+      driver:
+        "raspberry",
+
       checkedAt:
-        new Date().toISOString(),
+        new Date()
+          .toISOString(),
 
       details: {
-        commandAvailable: true,
+        commandAvailable:
+          true,
+
         cameraDetected,
+
         output:
           output.trim(),
       },
@@ -236,13 +459,21 @@ ${stderr || ""}`;
   } catch (error) {
     return {
       ok: false,
-      driver: "raspberry",
+
+      driver:
+        "raspberry",
+
       checkedAt:
-        new Date().toISOString(),
+        new Date()
+          .toISOString(),
 
       details: {
-        commandAvailable: true,
-        cameraDetected: false,
+        commandAvailable:
+          true,
+
+        cameraDetected:
+          false,
+
         error:
           error.stderr ||
           error.message,
@@ -253,5 +484,6 @@ ${stderr || ""}`;
 
 module.exports = {
   capturePhoto,
+  captureBurst,
   healthCheck,
 };

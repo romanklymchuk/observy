@@ -31,6 +31,7 @@ function assertDriverContract(
 ) {
   const requiredMethods = [
     "capturePhoto",
+    "captureBurst",
     "healthCheck",
   ];
 

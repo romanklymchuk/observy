@@ -31,6 +31,111 @@ async function capturePhoto(options = {}) {
   };
 }
 
+async function captureBurst(
+  options = {}
+) {
+  const count = Number.isInteger(
+    Number(options.count)
+  )
+    ? Math.max(
+        1,
+        Number(options.count)
+      )
+    : 5;
+
+  const directory =
+    options.outputDirectory ||
+    path.resolve(
+      process.cwd(),
+      "data",
+      "mock-burst",
+      `burst-${Date.now()}`
+    );
+
+  fs.mkdirSync(
+    directory,
+    {
+      recursive: true,
+    }
+  );
+
+  if (
+    !fs.existsSync(
+      DEFAULT_PHOTO_PATH
+    )
+  ) {
+    throw new Error(
+      `Mock camera photo not found: ${DEFAULT_PHOTO_PATH}`
+    );
+  }
+
+  const frames = [];
+
+  for (
+    let index = 0;
+    index < count;
+    index += 1
+  ) {
+    const frameNumber =
+      String(index + 1)
+        .padStart(
+          3,
+          "0"
+        );
+
+    const outputPath =
+      path.join(
+        directory,
+        `frame-${frameNumber}.jpg`
+      );
+
+    fs.copyFileSync(
+      DEFAULT_PHOTO_PATH,
+      outputPath
+    );
+
+    const stats =
+      fs.statSync(
+        outputPath
+      );
+
+    frames.push({
+      path:
+        outputPath,
+
+      index:
+        index + 1,
+
+      driver:
+        "mock",
+
+      capturedAt:
+        new Date()
+          .toISOString(),
+
+      sizeBytes:
+        stats.size,
+    });
+  }
+
+  return {
+    driver:
+      "mock",
+
+    count:
+      frames.length,
+
+    directory,
+
+    frames,
+
+    capturedAt:
+      new Date()
+        .toISOString(),
+  };
+}
+
+
 async function healthCheck() {
   const exists =
     fs.existsSync(
@@ -54,5 +159,6 @@ async function healthCheck() {
 
 module.exports = {
   capturePhoto,
+  captureBurst,
   healthCheck,
 };
