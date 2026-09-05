@@ -1,14 +1,21 @@
 const driverName =
   process.env.TRIGGER_DRIVER ||
-  (process.env.DEVICE_MODE === "mock"
-    ? "mock"
-    : "mock");
+  (
+    process.env.DEVICE_MODE === "raspberry"
+      ? "mpu6050"
+      : "mock"
+  );
 
 const driverLoaders = {
-  mock: () => require("./mock"),
+  mock: () =>
+    require("./mock"),
+
+  mpu6050: () =>
+    require("./mpu6050"),
 };
 
-const loadDriver = driverLoaders[driverName];
+const loadDriver =
+  driverLoaders[driverName];
 
 if (!loadDriver) {
   throw new Error(
@@ -16,4 +23,10 @@ if (!loadDriver) {
   );
 }
 
-module.exports = loadDriver();
+const driver =
+  loadDriver();
+
+module.exports = {
+  ...driver,
+  driverName,
+};

@@ -1,18 +1,32 @@
-const mode = process.env.DEVICE_MODE || "mock";
+const driverName =
+  process.env.MICROPHONE_DRIVER ||
+  (
+    process.env.DEVICE_MODE === "raspberry"
+      ? "raspberry"
+      : "mock"
+  );
 
-let microphone;
+const drivers = {
+  mock: () =>
+    require("./mock"),
 
-switch (mode) {
-  case "mock":
-    microphone = require("./mock");
-    break;
+  raspberry: () =>
+    require("./raspberry"),
+};
 
-  case "raspberry":
-    microphone = require("./raspberry");
-    break;
+const loadDriver =
+  drivers[driverName];
 
-  default:
-    throw new Error(`Unknown microphone mode: ${mode}`);
+if (!loadDriver) {
+  throw new Error(
+    `Unsupported microphone driver: ${driverName}`
+  );
 }
 
-module.exports = microphone;
+const driver =
+  loadDriver();
+
+module.exports = {
+  ...driver,
+  driverName,
+};
