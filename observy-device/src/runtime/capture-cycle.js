@@ -158,20 +158,35 @@ async function runCaptureCycle({
     );
 
     /*
-     * Photo capture
+     * Burst capture
      */
-    currentStage = "capture.photo";
+    currentStage = "capture.burst";
 
-    logger.info("capture.photo.started");
+    logger.info("capture.burst.started");
 
     const photoStartedAtMs =
       getMonotonicMs();
 
     let photoPath;
+    let burstDirectory;
+    let burstFrames = [];
 
     try {
-      const photoResult =
-        await Camera.capturePhoto({
+      const burstResult =
+        await Camera.captureBurst({
+          count:
+            Number(
+              process.env.CAMERA_BURST_SIZE ||
+              config.vision?.burstSize ||
+              5
+            ),
+
+          intervalMs:
+            Number(
+              process.env.CAMERA_BURST_INTERVAL_MS ||
+              150
+            ),
+
           width:
             config.camera?.width,
 
@@ -185,30 +200,47 @@ async function runCaptureCycle({
             config.camera?.timeoutMs,
         });
 
+      burstDirectory =
+        burstResult.directory;
+
+      burstFrames =
+        burstResult.frames || [];
+
+      if (burstFrames.length === 0) {
+        throw new Error(
+          "Camera burst completed without frames"
+        );
+      }
+
       photoPath =
-        photoResult.path;
+        burstFrames[0].path;
 
       logger.info(
-        "capture.photo.completed",
+        "capture.burst.completed",
         {
-          photoPath,
+          directory:
+            burstDirectory,
+
+          count:
+            burstFrames.length,
+
+          fallbackPhotoPath:
+            photoPath,
 
           driver:
-            photoResult.driver,
-
-          sizeBytes:
-            photoResult.sizeBytes,
+            burstResult.driver,
 
           capturedAt:
-            photoResult.capturedAt,
+            burstResult.capturedAt,
 
           durationMs:
             getDurationMs(photoStartedAtMs),
         }
       );
+
     } catch (error) {
       logger.error(
-        "capture.photo.failed",
+        "capture.burst.failed",
         {
           durationMs:
             getDurationMs(photoStartedAtMs),
