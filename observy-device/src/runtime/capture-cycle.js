@@ -293,15 +293,15 @@ async function runCaptureCycle({
     );
 
     /*
-     * Optional Vision processing
+     * Optional Vision processing.
      *
-     * Current v0 integration stages the
-     * captured photo as a one-frame set.
-     * Burst capture will replace this
-     * staging step later.
+     * The REAL camera burst directory is passed directly
+     * to the Vision service. No one-frame staging.
      */
     let selectedPhotoPath =
       photoPath;
+
+    let visionResult = null;
 
     if (
       config.vision?.enabled === true
@@ -312,52 +312,33 @@ async function runCaptureCycle({
       logger.info(
         "vision.processing.started",
         {
-          sourcePhotoPath:
-            photoPath,
+          framesDirectory:
+            burstDirectory,
+
+          frameCount:
+            burstFrames.length,
         }
       );
 
       const visionStartedAtMs =
         getMonotonicMs();
 
-      const framesDirectory =
-        path.resolve(
-          process.cwd(),
-          "data",
-          "vision",
-          observationContext.traceId
-        );
-
       try {
-        fs.mkdirSync(
-          framesDirectory,
-          {
-            recursive: true,
-          }
-        );
-
-        const stagedPhotoPath =
-          path.join(
-            framesDirectory,
-            "frame-001.jpg"
-          );
-
-        fs.copyFileSync(
-          photoPath,
-          stagedPhotoPath
-        );
-
-        const visionResult =
+        visionResult =
           await processFrames({
-            framesDirectory,
+            framesDirectory:
+              burstDirectory,
+
             model:
               config.vision?.model ||
               "yolo11n.pt",
+
             logger,
           });
 
         if (
           visionResult.ok &&
+          visionResult.birdDetected === true &&
           visionResult.bestFramePath
         ) {
           selectedPhotoPath =
@@ -366,16 +347,23 @@ async function runCaptureCycle({
           logger.info(
             "vision.frame.selected",
             {
+              birdDetected: true,
+
               bestFramePath:
                 selectedPhotoPath,
 
-              reason:
-                visionResult.reason ??
+              confidence:
+                visionResult.metrics
+                  ?.confidence ??
                 null,
 
               score:
                 visionResult.metrics
                   ?.score ??
+                null,
+
+              reason:
+                visionResult.reason ??
                 null,
 
               durationMs:
@@ -384,6 +372,31 @@ async function runCaptureCycle({
                 ),
             }
           );
+
+        } else if (
+          visionResult.ok &&
+          visionResult.birdDetected === false
+        ) {
+          logger.info(
+            "vision.no_bird",
+            {
+              frameCount:
+                burstFrames.length,
+
+              durationMs:
+                getDurationMs(
+                  visionStartedAtMs
+                ),
+            }
+          );
+
+          /*
+           * Event gating will be enabled once the
+           * external Vision worker is live.
+           * For now we deliberately keep frame #1
+           * as a safe fallback.
+           */
+
         } else {
           logger.warn(
             "vision.fallback.used",
@@ -402,11 +415,10 @@ async function runCaptureCycle({
             }
           );
         }
+
       } catch (error) {
         /*
-         * Vision is deliberately
-         * non-critical. Capture must
-         * survive ML failures.
+         * ML failure must not kill acquisition.
          */
         selectedPhotoPath =
           photoPath;
@@ -492,7 +504,8 @@ async function runCaptureCycle({
             observationContext
               .observationStartedAt,
 
-          photoPath,
+          photoPath:
+            selectedPhotoPath,
           audioPath,
 
           temperature,
