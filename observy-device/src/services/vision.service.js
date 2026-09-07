@@ -1,10 +1,26 @@
-const path = require("node:path");
+const fs =
+  require("node:fs");
+
+const path =
+  require("node:path");
+
+const axios =
+  require("axios");
+
+const FormData =
+  require("form-data");
+
 const {
   execFile,
-} = require("node:child_process");
+} = require(
+  "node:child_process"
+);
+
 const {
   promisify,
-} = require("node:util");
+} = require(
+  "node:util"
+);
 
 const execFileAsync =
   promisify(execFile);
@@ -24,6 +40,213 @@ const DEFAULT_SCRIPT_PATH =
     "best_frame.py"
   );
 
+const DEFAULT_HTTP_URL =
+  process.env.VISION_HTTP_URL ||
+  "http://127.0.0.1:8765";
+
+function getImagePaths(
+  framesDirectory
+) {
+  return fs
+    .readdirSync(
+      framesDirectory
+    )
+    .filter((name) =>
+      /\.(jpg|jpeg|png)$/i.test(
+        name
+      )
+    )
+    .sort()
+    .map((name) =>
+      path.join(
+        framesDirectory,
+        name
+      )
+    );
+}
+
+async function processFramesHttp({
+  framesDirectory,
+  timeoutMs,
+  logger,
+}) {
+  const imagePaths =
+    getImagePaths(
+      framesDirectory
+    );
+
+  if (
+    imagePaths.length === 0
+  ) {
+    return {
+      ok: false,
+      fallback: true,
+      reason:
+        "vision_frames_missing",
+      birdDetected: false,
+      bestFramePath: null,
+      metrics: null,
+    };
+  }
+
+  const form =
+    new FormData();
+
+  for (
+    const imagePath
+    of imagePaths
+  ) {
+    form.append(
+      "frames",
+      fs.createReadStream(
+        imagePath
+      ),
+      {
+        filename:
+          path.basename(
+            imagePath
+          ),
+      }
+    );
+  }
+
+  logger?.info(
+    "vision.http.started",
+    {
+      url:
+        `${DEFAULT_HTTP_URL}/analyze`,
+      frameCount:
+        imagePaths.length,
+    }
+  );
+
+  const response =
+    await axios.post(
+      `${DEFAULT_HTTP_URL}/analyze`,
+      form,
+      {
+        headers:
+          form.getHeaders(),
+
+        timeout:
+          timeoutMs,
+
+        maxBodyLength:
+          Infinity,
+
+        maxContentLength:
+          Infinity,
+      }
+    );
+
+  const result =
+    response.data;
+
+  let bestFramePath =
+    null;
+
+  if (
+    result.bestFrameFilename
+  ) {
+    const safeFilename =
+      path.basename(
+        result.bestFrameFilename
+      );
+
+    const candidate =
+      path.join(
+        framesDirectory,
+        safeFilename
+      );
+
+    if (
+      fs.existsSync(
+        candidate
+      )
+    ) {
+      bestFramePath =
+        candidate;
+    }
+  }
+
+  logger?.info(
+    "vision.http.completed",
+    {
+      birdDetected:
+        result.birdDetected ??
+        false,
+
+      bestFrameFilename:
+        result.bestFrameFilename ??
+        null,
+
+      bestFramePath,
+
+      score:
+        result.metrics?.score ??
+        null,
+    }
+  );
+
+  return {
+    ...result,
+
+    bestFramePath,
+
+    fallback: false,
+  };
+}
+
+async function processFramesLocal({
+  framesDirectory,
+  model,
+  pythonPath,
+  scriptPath,
+  timeoutMs,
+  logger,
+}) {
+  const args = [
+    scriptPath,
+    framesDirectory,
+    "--json",
+    "--model",
+    model,
+  ];
+
+  const {
+    stdout,
+    stderr,
+  } =
+    await execFileAsync(
+      pythonPath,
+      args,
+      {
+        timeout:
+          timeoutMs,
+
+        maxBuffer:
+          10 * 1024 * 1024,
+      }
+    );
+
+  if (
+    stderr &&
+    stderr.trim().length > 0
+  ) {
+    logger?.warn(
+      "vision.worker.stderr",
+      {
+        stderr:
+          stderr.trim(),
+      }
+    );
+  }
+
+  return JSON.parse(
+    stdout.trim()
+  );
+}
+
 async function processFrames({
   framesDirectory,
   model = "yolo11n.pt",
@@ -34,79 +257,53 @@ async function processFrames({
   timeoutMs = 120000,
   logger = null,
 }) {
-  if (!framesDirectory) {
+  if (
+    !framesDirectory
+  ) {
     return {
       ok: false,
       fallback: true,
-      reason: "frames_directory_missing",
+      reason:
+        "frames_directory_missing",
       bestFramePath: null,
       metrics: null,
     };
   }
 
-  const args = [
-    scriptPath,
-    framesDirectory,
-    "--json",
-    "--model",
-    model,
-  ];
+  const driver =
+    process.env.VISION_DRIVER ||
+    "local";
 
   try {
-    const {
-      stdout,
-      stderr,
-    } = await execFileAsync(
-      pythonPath,
-      args,
-      {
-        timeout: timeoutMs,
-        maxBuffer:
-          10 * 1024 * 1024,
-      }
-    );
-
-    if (
-      stderr &&
-      stderr.trim().length > 0
-    ) {
-      logger?.warn(
-        "vision.worker.stderr",
-        {
-          stderr:
-            stderr.trim(),
-        }
-      );
-    }
-
     let result;
 
-    try {
-      result =
-        JSON.parse(
-          stdout.trim()
-        );
-    } catch {
-      logger?.warn(
-        "vision.worker.invalid_json",
-        {
-          stdout:
-            stdout.slice(
-              0,
-              2000
-            ),
-        }
-      );
-
-      return {
-        ok: false,
-        fallback: true,
-        reason:
-          "vision_invalid_json",
-        bestFramePath: null,
-        metrics: null,
-      };
+    if (
+      driver === "http"
+    ) {
+      return await processFramesHttp({
+        framesDirectory,
+        timeoutMs,
+        logger,
+      });
     }
+
+    if (
+      driver !== "local"
+    ) {
+      throw new Error(
+        `Unsupported vision driver: ${driver}`
+      );
+    }
+
+    result =
+      await processFramesLocal({
+        framesDirectory,
+        model,
+        pythonPath,
+        scriptPath,
+        timeoutMs,
+        logger,
+      });
 
     logger?.info(
       "vision.processing.completed",
@@ -129,18 +326,24 @@ async function processFrames({
       ...result,
       fallback: false,
     };
+
   } catch (error) {
     logger?.warn(
       "vision.processing.failed",
       {
+        driver,
+
         errorName:
-          error?.name ?? null,
+          error?.name ??
+          null,
 
         errorMessage:
-          error?.message ?? null,
+          error?.message ??
+          null,
 
         errorCode:
-          error?.code ?? null,
+          error?.code ??
+          null,
       }
     );
 
