@@ -321,7 +321,12 @@ def build_json_result(frames):
     detected_frames = [
         frame
         for frame in frames
-        if frame["bird_detected"]
+        if (
+            frame["bird_detected"]
+            and frame["confidence"] >= 0.60
+            and frame["final_score"] >= 0.45
+            and frame["border_penalty"] <= 0.80
+        )
     ]
 
     serialized_frames = [
