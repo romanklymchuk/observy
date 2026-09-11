@@ -158,135 +158,189 @@ async function runCaptureCycle({
     );
 
     /*
-     * Burst capture
+     * Parallel multimodal capture:
+     * camera burst + audio recording.
+     *
+     * Both operations start together. We wait for both
+     * to settle before continuing or failing the cycle.
      */
-    currentStage = "capture.burst";
-
-    logger.info("capture.burst.started");
-
-    const photoStartedAtMs =
-      getMonotonicMs();
+    currentStage = "capture.parallel";
 
     let photoPath;
     let burstDirectory;
     let burstFrames = [];
-
-    try {
-      const burstResult =
-        await Camera.captureBurst({
-          count:
-            Number(
-              process.env.CAMERA_BURST_SIZE ||
-              config.vision?.burstSize ||
-              5
-            ),
-
-          intervalMs:
-            Number(
-              process.env.CAMERA_BURST_INTERVAL_MS ||
-              150
-            ),
-
-          width:
-            config.camera?.width,
-
-          height:
-            config.camera?.height,
-
-          quality:
-            config.camera?.quality,
-
-          timeoutMs:
-            config.camera?.timeoutMs,
-        });
-
-      burstDirectory =
-        burstResult.directory;
-
-      burstFrames =
-        burstResult.frames || [];
-
-      if (burstFrames.length === 0) {
-        throw new Error(
-          "Camera burst completed without frames"
-        );
-      }
-
-      photoPath =
-        burstFrames[0].path;
-
-      logger.info(
-        "capture.burst.completed",
-        {
-          directory:
-            burstDirectory,
-
-          count:
-            burstFrames.length,
-
-          fallbackPhotoPath:
-            photoPath,
-
-          driver:
-            burstResult.driver,
-
-          capturedAt:
-            burstResult.capturedAt,
-
-          durationMs:
-            getDurationMs(photoStartedAtMs),
-        }
-      );
-
-    } catch (error) {
-      logger.error(
-        "capture.burst.failed",
-        {
-          durationMs:
-            getDurationMs(photoStartedAtMs),
-          error,
-        }
-      );
-
-      throw error;
-    }
-
-    /*
-     * Audio capture
-     */
-    currentStage = "capture.audio";
-
-    logger.info("capture.audio.started");
-
-    const audioStartedAtMs =
-      getMonotonicMs();
-
     let audioPath;
 
-    try {
-      audioPath =
-        await Microphone.recordAudio();
+    logger.info("capture.parallel.started");
 
-      logger.info(
-        "capture.audio.completed",
-        {
-          audioPath,
-          durationMs:
-            getDurationMs(audioStartedAtMs),
-        }
-      );
-    } catch (error) {
-      logger.error(
-        "capture.audio.failed",
-        {
-          durationMs:
-            getDurationMs(audioStartedAtMs),
-          error,
-        }
-      );
+    const captureStartedAtMs =
+      getMonotonicMs();
 
-      throw error;
+    const burstPromise = (async () => {
+      logger.info("capture.burst.started");
+
+      const photoStartedAtMs =
+        getMonotonicMs();
+
+      try {
+        const burstResult =
+          await Camera.captureBurst({
+            count:
+              Number(
+                process.env.CAMERA_BURST_SIZE ||
+                config.vision?.burstSize ||
+                5
+              ),
+            intervalMs:
+              Number(
+                process.env.CAMERA_BURST_INTERVAL_MS ||
+                150
+              ),
+            width:
+              config.camera?.width,
+            height:
+              config.camera?.height,
+            quality:
+              config.camera?.quality,
+            timeoutMs:
+              config.camera?.timeoutMs,
+          });
+
+        const frames =
+          burstResult.frames || [];
+
+        if (frames.length === 0) {
+          throw new Error(
+            "Camera burst completed without frames"
+          );
+        }
+
+        logger.info(
+          "capture.burst.completed",
+          {
+            directory:
+              burstResult.directory,
+            count:
+              frames.length,
+            fallbackPhotoPath:
+              frames[0].path,
+            driver:
+              burstResult.driver,
+            capturedAt:
+              burstResult.capturedAt,
+            durationMs:
+              getDurationMs(
+                photoStartedAtMs
+              ),
+          }
+        );
+
+        return {
+          directory:
+            burstResult.directory,
+          frames,
+          photoPath:
+            frames[0].path,
+        };
+      } catch (error) {
+        logger.error(
+          "capture.burst.failed",
+          {
+            durationMs:
+              getDurationMs(
+                photoStartedAtMs
+              ),
+            error,
+          }
+        );
+
+        throw error;
+      }
+    })();
+
+    const audioPromise = (async () => {
+      logger.info("capture.audio.started");
+
+      const audioStartedAtMs =
+        getMonotonicMs();
+
+      try {
+        const path =
+          await Microphone.recordAudio();
+
+        logger.info(
+          "capture.audio.completed",
+          {
+            audioPath: path,
+            durationMs:
+              getDurationMs(
+                audioStartedAtMs
+              ),
+          }
+        );
+
+        return path;
+      } catch (error) {
+        logger.error(
+          "capture.audio.failed",
+          {
+            durationMs:
+              getDurationMs(
+                audioStartedAtMs
+              ),
+            error,
+          }
+        );
+
+        throw error;
+      }
+    })();
+
+    const [
+      burstOutcome,
+      audioOutcome,
+    ] = await Promise.allSettled([
+      burstPromise,
+      audioPromise,
+    ]);
+
+    if (
+      burstOutcome.status ===
+      "rejected"
+    ) {
+      throw burstOutcome.reason;
     }
+
+    if (
+      audioOutcome.status ===
+      "rejected"
+    ) {
+      throw audioOutcome.reason;
+    }
+
+    burstDirectory =
+      burstOutcome.value.directory;
+    burstFrames =
+      burstOutcome.value.frames;
+    photoPath =
+      burstOutcome.value.photoPath;
+
+    audioPath =
+      audioOutcome.value;
+
+    logger.info(
+      "capture.parallel.completed",
+      {
+        burstFrames:
+          burstFrames.length,
+        photoPath,
+        audioPath,
+        durationMs:
+          getDurationMs(
+            captureStartedAtMs
+          ),
+      }
+    );
 
     stateMachine?.transition(
       "PROCESSING"
