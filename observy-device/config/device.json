@@ -9,7 +9,7 @@
   "humidityMin": 45,
   "humidityMax": 70,
   "vision": {
-    "enabled": false,
+    "enabled": true,
     "burstSize": 10,
     "bestFrame": {
       "enabled": true,
