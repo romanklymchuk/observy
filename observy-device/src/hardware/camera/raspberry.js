@@ -248,13 +248,13 @@ async function captureBurst(
   const count =
     parsePositiveInteger(
       options.count,
-      5
+      3
     );
 
   const intervalMs =
     parsePositiveInteger(
       options.intervalMs,
-      150
+      300
     );
 
   const outputDirectory =
@@ -276,7 +276,7 @@ async function captureBurst(
   const timeoutMs =
     parsePositiveInteger(
       options.timeoutMs,
-      800
+      2500
     );
 
   const quality =
@@ -296,85 +296,156 @@ async function captureBurst(
     new Date()
       .toISOString();
 
-  const frames = [];
+  const startedAt =
+    Date.now();
 
-  for (
-    let index = 0;
-    index < count;
-    index += 1
-  ) {
-    const frameNumber =
-      String(
-        index + 1
-      ).padStart(
-        3,
-        "0"
-      );
+  const outputPattern =
+    path.join(
+      outputDirectory,
+      "frame-%04d.jpg"
+    );
 
-    const outputPath =
-      path.join(
-        outputDirectory,
-        `frame-${frameNumber}.jpg`
-      );
-
-    const frameStartedAt =
-      Date.now();
-
-    const result =
-      await capturePhoto({
-        outputPath,
-        width,
-        height,
+  const args = [
+    "--output",
+    outputPattern,
+    "--width",
+    String(width),
+    "--height",
+    String(height),
+    "--quality",
+    String(
+      Math.min(
         quality,
-        timeoutMs,
-      });
+        100
+      )
+    ),
+    "--timeout",
+    String(timeoutMs),
+    "--timelapse",
+    String(intervalMs),
+    "--autofocus-mode",
+    "continuous",
+    "--zsl",
+    "--nopreview",
+  ];
 
-    frames.push({
-      ...result,
-
-      index:
-        index + 1,
-
-      durationMs:
-        Date.now() -
-        frameStartedAt,
-    });
-
-    if (
-      index <
-      count - 1
-    ) {
-      await sleep(
-        intervalMs
+  try {
+    await execFileAsync(
+      "rpicam-still",
+      args,
+      {
+        timeout:
+          timeoutMs +
+          10000,
+      }
+    );
+  } catch (error) {
+    const wrapped =
+      new Error(
+        `Raspberry burst capture failed: ${
+          error.stderr ||
+          error.message
+        }`
       );
-    }
+
+    wrapped.code =
+      error.code ||
+      "CAMERA_BURST_FAILED";
+
+    wrapped.cause =
+      error;
+
+    throw wrapped;
   }
+
+  const files =
+    fs.readdirSync(
+      outputDirectory
+    )
+      .filter(
+        (name) =>
+          name.endsWith(".jpg")
+      )
+      .sort();
+
+  if (
+    files.length <
+    count
+  ) {
+    throw new Error(
+      `Camera burst produced ${files.length} frame(s), expected at least ${count}`
+    );
+  }
+
+  const selectedFiles =
+    files.slice(
+      0,
+      count
+    );
+
+  const durationMs =
+    Date.now() -
+    startedAt;
+
+  const frames =
+    selectedFiles.map(
+      (
+        filename,
+        index
+      ) => {
+        const framePath =
+          path.join(
+            outputDirectory,
+            filename
+          );
+
+        const stats =
+          validateCapturedFile(
+            framePath
+          );
+
+        return {
+          path:
+            framePath,
+          driver:
+            "raspberry",
+          capturedAt:
+            burstStartedAt,
+          sizeBytes:
+            stats.size,
+          index:
+            index + 1,
+          durationMs:
+            null,
+        };
+      }
+    );
 
   return {
     driver:
       "raspberry",
-
     count:
       frames.length,
-
     directory:
       outputDirectory,
-
     capturedAt:
       burstStartedAt,
-
     frames,
-
+    durationMs,
     metadata: {
       requestedCount:
         count,
-
       intervalMs,
-
       width,
       height,
       quality,
       timeoutMs,
+      autofocusMode:
+        "continuous",
+      zsl:
+        true,
+      processMode:
+        "single-process",
     },
   };
 }
