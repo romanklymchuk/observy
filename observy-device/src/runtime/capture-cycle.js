@@ -304,29 +304,34 @@ async function runCaptureCycle({
       audioPromise,
     ]);
 
-    if (
-      burstOutcome.status ===
-      "rejected"
-    ) {
+    if (burstOutcome.status === "rejected") {
+      logger.error("capture.failed", {
+        reason: "camera_unavailable",
+        audioSucceeded: audioOutcome.status === "fulfilled",
+      });
+
       throw burstOutcome.reason;
     }
 
-    if (
-      audioOutcome.status ===
-      "rejected"
-    ) {
-      throw audioOutcome.reason;
+    burstDirectory = burstOutcome.value.directory;
+    burstFrames = burstOutcome.value.frames;
+    photoPath = burstOutcome.value.photoPath;
+
+    const captureDegraded =
+      audioOutcome.status === "rejected";
+
+    if (captureDegraded) {
+      audioPath = undefined;
+
+      logger.warn("capture.degraded", {
+        reason: "audio_unavailable",
+        photoPath,
+        frameCount: burstFrames.length,
+        error: String(audioOutcome.reason),
+      });
+    } else {
+      audioPath = audioOutcome.value;
     }
-
-    burstDirectory =
-      burstOutcome.value.directory;
-    burstFrames =
-      burstOutcome.value.frames;
-    photoPath =
-      burstOutcome.value.photoPath;
-
-    audioPath =
-      audioOutcome.value;
 
     logger.info(
       "capture.parallel.completed",

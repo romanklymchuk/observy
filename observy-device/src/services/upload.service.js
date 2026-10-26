@@ -11,6 +11,12 @@ async function uploadEvent({
   humidity,
   durationSec = 8,
 }) {
+  if (!photoPath && !audioPath) {
+    throw new Error(
+      "Cannot upload observation without photo or audio"
+    );
+  }
+
   const form = new FormData();
 
   form.append("station_id", stationId);
@@ -19,15 +25,19 @@ async function uploadEvent({
   form.append("humidity", String(humidity));
   form.append("duration_sec", String(durationSec));
 
-  form.append(
-    "photo",
-    fs.createReadStream(photoPath)
-  );
+  if (photoPath) {
+    form.append(
+      "photo",
+      fs.createReadStream(photoPath)
+    );
+  }
 
-  form.append(
-    "audio",
-    fs.createReadStream(audioPath)
-  );
+  if (audioPath) {
+    form.append(
+      "audio",
+      fs.createReadStream(audioPath)
+    );
+  }
 
   console.log("⬆ Uploading event...");
 
@@ -36,6 +46,7 @@ async function uploadEvent({
     form,
     {
       headers: form.getHeaders(),
+      timeout: 30000,
     }
   );
 

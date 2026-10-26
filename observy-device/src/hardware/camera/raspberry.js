@@ -368,12 +368,15 @@ async function captureBurst(
       )
       .sort();
 
-  if (
-    files.length <
-    count
-  ) {
+  if (files.length === 0) {
     throw new Error(
-      `Camera burst produced ${files.length} frame(s), expected at least ${count}`
+      "Camera burst produced no frames"
+    );
+  }
+
+  if (files.length < count) {
+    console.warn(
+      `[CAMERA] Degraded burst: ${files.length}/${count} frames`
     );
   }
 
